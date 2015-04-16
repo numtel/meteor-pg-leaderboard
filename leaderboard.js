@@ -1,9 +1,9 @@
 // Data is read from select statements published by server
-players = new MysqlSubscription('allPlayers');
-myScore = new MysqlSubscription('playerScore', 'Maxwell');
+players = new PgSubscription('allPlayers');
+myScore = new PgSubscription('playerScore', 'Maxwell');
 
-myScore.addEventListener('update', function(index, msg){
-  console.log(msg.fields.score);
+myScore.addEventListener('updated', function(diff, data){
+  data.length && console.log(data[0].score);
 });
 
 if (Meteor.isClient) {
@@ -63,16 +63,11 @@ if (Meteor.isClient) {
 }
 
 if (Meteor.isServer) {
-  var liveDb = new LiveMysql({
-    host: 'localhost',
-    user: 'root',
-    password: 'numtel',
-    database: 'leaderboard'
-  });
+  var CONN_STR = 'postgres://meteor:meteor@127.0.0.1/meteor';
+  var liveDb = new LivePg(CONN_STR, 'leaderboard_example');
 
   var closeAndExit = function() {
-    liveDb.end();
-    process.exit();
+    liveDb.cleanup().then(process.exit);
   };
   // Close connections on hot code push
   process.on('SIGTERM', closeAndExit);
@@ -80,34 +75,42 @@ if (Meteor.isServer) {
   process.on('SIGINT', closeAndExit);
 
   Meteor.publish('allPlayers', function(){
-    return liveDb.select(
-      'SELECT * FROM players ORDER BY score DESC',
-      [ { table: 'players' } ]
-    );
+    return liveDb.select('SELECT * FROM players ORDER BY score DESC');
   });
 
   Meteor.publish('playerScore', function(name){
     return liveDb.select(
-      'SELECT id, score FROM players WHERE name = ' + liveDb.db.escape(name),
-      [
-        {
-          table: 'players',
-          condition: function(row, newRow){
-            return row.name === name;
-          }
+      'SELECT id, score FROM players WHERE name = $1', [ name ],
+      {
+        'players': function(row) {
+          return row.name === name;
         }
-      ]
+      }
     );
   });
 
   Meteor.methods({
     'incScore': function(id, amount){
-      if(typeof id === 'number' && typeof amount === 'number'){
-        liveDb.db.query(
-          'UPDATE players SET score = score + ? WHERE id = ?',
-          [ amount, id ]
-        );
-      }
+      // Ensure arguments validate
+      check(id, Number);
+      check(amount, Number);
+
+      // Obtain a client from the pool
+      pg.connect(CONN_STR, function(error, client, done) {
+        if(error) throw error;
+
+        // Perform query
+        client.query(
+          'UPDATE players SET score = score + $1 WHERE id = $2',
+          [ amount, id ],
+          function(error, result) {
+            // Release client back into pool
+            done();
+
+            if(error) throw error;
+          }
+        )
+      });
     }
   });
 }

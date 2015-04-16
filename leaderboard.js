@@ -1,14 +1,20 @@
-// Data is read from select statements published by server
+// Meteor Leaderboard Example with PostgreSQL backend
+
+// Data is read from select statements published by server (further down)
 players = new PgSubscription('allPlayers');
+
+// Extra (not used anywhere on the app UI) subscription to display different
+//  use case with arguments and manually authored triggers
 myScore = new PgSubscription('playerScore', 'Maxwell');
 
 myScore.addEventListener('updated', function(diff, data){
   data.length && console.log(data[0].score);
 });
 
+
 if (Meteor.isClient) {
 
-  // Provide a client side stub
+  // Provide a client side stub for latency compensation
   Meteor.methods({
     'incScore': function(id, amount){
       var originalIndex;
@@ -63,10 +69,12 @@ if (Meteor.isClient) {
 }
 
 if (Meteor.isServer) {
+  // XXX: Update this connection string to match your configuration!
   var CONN_STR = 'postgres://meteor:meteor@127.0.0.1/meteor';
   var liveDb = new LivePg(CONN_STR, 'leaderboard_example');
 
   var closeAndExit = function() {
+    // Cleanup removes triggers and functions used to transmit updates
     liveDb.cleanup().then(process.exit);
   };
   // Close connections on hot code push
@@ -75,10 +83,15 @@ if (Meteor.isServer) {
   process.on('SIGINT', closeAndExit);
 
   Meteor.publish('allPlayers', function(){
+    // No triggers specified, the package will automatically refresh the
+    // query on any change to the dependent tables (just players in this case).
     return liveDb.select('SELECT * FROM players ORDER BY score DESC');
   });
 
   Meteor.publish('playerScore', function(name){
+    // Parameter array used and a manually specified trigger to only refresh
+    // the result set when the row changing on the players table matches the
+    // name argument passed to the publish function.
     return liveDb.select(
       'SELECT id, score FROM players WHERE name = $1', [ name ],
       {

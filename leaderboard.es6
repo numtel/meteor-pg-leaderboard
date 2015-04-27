@@ -5,10 +5,10 @@ players = new PgSubscription('allPlayers');
 
 // Extra (not used anywhere on the app UI) subscription to display different
 //  use case with arguments and manually authored triggers
-myScore = new PgSubscription('playerScore', 'Maxwell');
+myScore = new PgSubscription('myClassScores', 1);
 
 myScore.addEventListener('updated', function(diff, data){
-  data.length && console.log(data[0].score);
+  data.length && console.log(data);
 });
 
 
@@ -100,6 +100,75 @@ if (Meteor.isServer) {
         }
       }
     );
+  });
+
+  // Example from wiki page
+  // https://github.com/numtel/meteor-pg/wiki/Publishing-Efficient-Joined-Queries
+  Meteor.publish('myClassScores', function(classId) {
+    check(classId, Number);
+
+    // Triggers require caches of columns that are joined on
+    var assignmentIds = [], studentIds = [];
+
+    // Prepare supporting query to main query
+    var classAssignments = liveDb.select(
+      `SELECT id FROM assignments WHERE class_id = $1`,
+      // Query Parameters
+      [ classId ],
+      // Invalidation functions
+      {
+        assignments: function(row){
+          return row.class_id === classId;
+        }
+      });
+    // Update cache on new data
+    classAssignments.on('update', function(diff, results) {
+      assignmentIds = results.map(function(row) { return row.id });
+    });
+
+    // Subscription has been stopped, also stop supporting query
+    this.onStop(function() {
+      classAssignments.stop();
+    });
+
+    var classScores = liveDb.select(`
+      SELECT
+        students.name AS student_name,
+        students.id AS student_id,
+        assignments.name,
+        assignments.value,
+        scores.score
+      FROM
+        scores
+      INNER JOIN assignments ON
+        (assignments.id = scores.assignment_id)
+      INNER JOIN students ON
+        (students.id = scores.student_id)
+      WHERE
+        assignments.class_id = $1`,
+      // Query Parameters
+      [ classId ],
+      // Invalidation functions
+      {
+        assignments: function(row) {
+          return row.class_id === classId;
+        },
+        students: function(row) {
+          // Check if the id of this row matches cache value set
+          return studentIds.indexOf(row.id) !== -1;
+        },
+        scores: function(row) {
+          // Check if the assignment_id of this row matches cache value set
+          return assignmentIds.indexOf(row.assignment_id) !== -1
+        }
+      });
+
+    classScores.on('update', function(diff, results) {
+      // Update student_id cache
+      studentIds = results.map(function(row) { return row.student_id });
+    });
+
+    return classScores;
   });
 
   Meteor.methods({

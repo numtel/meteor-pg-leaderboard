@@ -75,7 +75,7 @@ if (Meteor.isServer) {
 
   var closeAndExit = function() {
     // Cleanup removes triggers and functions used to transmit updates
-    liveDb.cleanup().then(process.exit);
+    liveDb.cleanup(process.exit);
   };
   // Close connections on hot code push
   process.on('SIGTERM', closeAndExit);

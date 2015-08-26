@@ -70,7 +70,10 @@ if (Meteor.isClient) {
 
 if (Meteor.isServer) {
   // XXX: Update this connection string to match your configuration!
-  var CONN_STR = 'postgres://meteor:meteor@127.0.0.1/meteor';
+  // When using an externally configured PostgreSQL server, the default port
+  //  is 5432.
+  var CONN_STR =
+    'postgres://' + process.env.USER + ':numtel@127.0.0.1:5438/postgres';
   var liveDb = new LivePg(CONN_STR, 'leaderboard_example');
 
   var closeAndExit = function() {
